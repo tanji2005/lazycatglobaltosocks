@@ -1,0 +1,2 @@
+# Only for developing/running tests. The .sh script has NO Python dependency.
+cryptography>=41

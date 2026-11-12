@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+.coverage
+htmlcov/
+private/
+artifacts/
+snapshots/
+*.bin
+*.key
+dump*.json
+nodes*.json
+config*.json
+*.log
+dist/
