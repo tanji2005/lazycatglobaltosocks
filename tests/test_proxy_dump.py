@@ -54,17 +54,17 @@ class ShellTests(unittest.TestCase):
             with self.subTest(size=size):
                 plain = os.urandom(size)
                 self.encrypt(plain)
-                result = self.run_tool("config")
+                result = self.run_tool("config", "--raw")
                 self.assertEqual(result.returncode, 0, result.stderr.decode())
                 self.assertEqual(result.stdout, plain + b"\n")
         plain = json.dumps({"note": "仅用于测试，不是真实配置"}, ensure_ascii=False).encode()
         self.encrypt(plain)
-        self.assertEqual(self.run_tool().stdout, plain + b"\n")
+        self.assertEqual(json.loads(self.run_tool().stdout), json.loads(plain))
 
     def test_largest_supported_ciphertext(self):
         plain = b"x" * (65536 - 28)
         self.encrypt(plain)
-        result = self.run_tool()
+        result = self.run_tool("--raw")
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         self.assertEqual(result.stdout, plain + b"\n")
 
@@ -103,7 +103,7 @@ class ShellTests(unittest.TestCase):
         self.encrypt(plain)
         before = self.config.read_bytes()
         output = self.root / "output.json"
-        result = self.run_tool("--output", str(output))
+        result = self.run_tool("--output", str(output), "--raw")
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         self.assertEqual(result.stdout, b"")
         self.assertEqual(output.read_bytes(), plain)
@@ -173,6 +173,48 @@ class ShellTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr.decode())
             self.assertEqual(json.loads(result.stdout), expected)
             self.assertEqual(received, [("/guest/nodes", "Bearer " + TOKEN, "What-You-Wanna-Do")])
+
+    def test_default_config_one_field_per_line(self):
+        original = self.flat_config()
+        self.encrypt(original)
+        result = self.run_tool("config")
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual(json.loads(result.stdout), json.loads(original))
+        lines = result.stdout.decode().splitlines()
+        self.assertEqual(len(lines), 6)
+        self.assertTrue(lines[1].startswith('  "mother_ip": '))
+        self.assertTrue(lines[2].startswith('  "api_port": '))
+        self.assertEqual(result.stdout[-2:], b"}\n")
+
+    def test_nested_node_formatting_preserves_every_value(self):
+        value = {
+            "listen_ip": "192.0.2.1",
+            "nodes": [{"info": '测试节点 "quoted" \\ end', "port": 5001,
+                       "socks_user": "test-user", "socks_pass": "test-only",
+                       "extra": [[], {}, [True, False, None, -1.2e30]]}],
+            "unknown": "brackets { } [ ] , : must stay unchanged",
+        }
+        original = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
+        with self.api(body=original) as (port, _, _):
+            self.encrypt(self.flat_config(api_port=port))
+            result = self.run_tool("nodes")
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            self.assertEqual(json.loads(result.stdout), value)
+            self.assertIn(b'      "port": 5001,\n', result.stdout)
+            raw = self.run_tool("nodes", "--raw")
+            self.assertEqual(raw.returncode, 0, raw.stderr.decode())
+            self.assertEqual(raw.stdout, original + b"\n")
+
+    def test_formatted_file_is_private_and_complete(self):
+        original = self.flat_config()
+        self.encrypt(original)
+        output = self.root / "formatted.json"
+        result = self.run_tool("--output", str(output))
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual(result.stdout, b"")
+        self.assertEqual(json.loads(output.read_bytes()), json.loads(original))
+        self.assertEqual(len(output.read_text().splitlines()), 6)
+        self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
 
     def test_api_override(self):
         with self.api() as (port, expected, received):

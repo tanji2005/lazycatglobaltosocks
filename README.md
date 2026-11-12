@@ -28,6 +28,21 @@ sh ./proxy_dump.sh config
 sh ./proxy_dump.sh nodes
 ```
 
+默认输出会自动换行、缩进，每个字段单独一行，不需要安装 jq。
+例如 `config` 会显示为：
+
+```json
+{
+  "api_port": 4399,
+  "api_token": "EXAMPLE_API_TOKEN",
+  "debug": false,
+  "mother_ip": "192.0.2.1"
+}
+```
+
+`config` 用于检查本地管理地址、API 端口和认证令牌，**不是节点查询命令**。
+本地文件没有变化时，重复执行得到相同结果是正常的；查看 SOCKS 账号、密码和端口请运行 `nodes`。
+
 脚本只读，不切换节点，不修改 sing-box、Tunnel 或客户端配置。
 输出含真实凭据，不要把结果粘贴到公开的 GitHub Issue 或提交到仓库。
 
@@ -44,12 +59,12 @@ sudo sh proxy_dump.sh config
 sudo sh proxy_dump.sh nodes
 ```
 
-`config` 默认输出紧凑 JSON，`nodes` 原样输出接口的 HTTP 200 响应。
-如果另外装有 jq，可以自行管道格式化：
+`config` 和 `nodes` 默认都会输出自动换行、缩进的 JSON，保留全部字段和值。
+如果需要原始格式供其他程序处理，可以加 `--raw`：
 
 ```sh
-sudo sh proxy_dump.sh config | jq .
-sudo sh proxy_dump.sh nodes | jq .
+sudo sh proxy_dump.sh config --raw
+sudo sh proxy_dump.sh nodes --raw
 ```
 
 显式指定配置路径：
@@ -73,7 +88,7 @@ sudo sh proxy_dump.sh nodes --output private/nodes.json
 已验证版本的 `client.bin` 包含管理端地址、端口、`api_token`、调试状态等客户端配置。
 完整的 SOCKS 节点列表通常由接口实时下发，包含转发端口及节点账号密码。
 
-- `config`：离线读取本地文件，不查询 API。
+- `config`：离线读取本地文件，不查询 API，主要用于查看管理端连接配置。
 - `nodes`：解密本地文件后，仅执行一次 `GET /guest/nodes`；不注册客户端、不切换节点、不修复配置。
 
 `nodes` 只支持已经观测确认的接口：
@@ -122,7 +137,7 @@ sh proxy_dump.sh nodes \
 - 配置输入上限为 64 KiB，节点响应上限为 4 MiB。
 - `nodes` 模式严格解析当前版本的平面 ASCII 配置；嵌套结构、重复字段或不支持的格式会拒绝处理，而不是猜测凭据。
 - 如已知另一个 AES-256 内容密钥，可以通过 `--key-file PATH` 提供 64 位十六进制文件；它不是 API token。
-- `nodes` 原样输出成功响应，不提供通用 JSON schema 校验，也不证明接口列出的节点一定连通。
+- 默认格式化仅用于展示，不提供通用 JSON schema 校验，也不证明接口列出的节点一定连通；`--raw` 保留原始内容。
 - 文件不可读、认证失败、接口非 HTTP 200 或网络错误时返回非零状态；错误信息不回显 API 令牌或响应正文。
 
 ## 数据与开源

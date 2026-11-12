@@ -19,11 +19,12 @@ usage() {
   --key-file PATH     可选 AES 密钥文件：64 个十六进制字符，不是 API token
   --api-url URL       nodes 模式下指定完整接口 URL，如 SSH 转发地址
   --timeout SECONDS   节点接口超时，整数 1–300，默认 10
+  --raw               原样输出，不自动换行缩进（适合其他程序读取）
   -h, --help          显示帮助
   --version           显示版本
 
 仅支持已验证的 v1.8.0 AES-256-GCM 格式，不支持旧的 XChaCha20 版本。
-默认输出包含真实凭据，请勿将运行结果提交到 GitHub。
+默认按字段换行缩进，不需要 jq；输出包含真实凭据，请勿提交到 GitHub。
 HELP
 }
 
@@ -34,6 +35,7 @@ key_file=
 api_url=
 timeout=10
 mode_set=0
+raw=0
 while [ "$#" -gt 0 ]; do
     case "$1" in
         config|nodes)
@@ -50,7 +52,8 @@ while [ "$#" -gt 0 ]; do
             esac
             shift 2 ;;
         -h|--help) usage; exit 0 ;;
-        --version) printf '1.0.0\n'; exit 0 ;;
+        --raw) raw=1; shift ;;
+        --version) printf '1.1.0\n'; exit 0 ;;
         *) die "未知选项：$1" ;;
     esac
 done
@@ -244,6 +247,53 @@ END {
     result=$work/nodes.json
 fi
 
+if [ "$raw" -eq 0 ]; then
+    # Formatting only: preserve scalar/string bytes, including escaped JSON
+    # characters and unknown fields. Never eval data or require jq/Python.
+    if ! awk '
+function indent(  j) { for (j=0;j<depth;j++) printf "  " }
+function next_token(pos) {
+    while (pos<=length(doc) && substr(doc,pos,1) ~ /[ \t\r\n]/) pos++
+    return pos
+}
+function bad() { failed=1; exit 1 }
+{ doc=doc $0 "\n" }
+END {
+    if (failed) exit 1
+    for (i=1;i<=length(doc);i++) {
+        c=substr(doc,i,1)
+        if (in_string) {
+            printf "%s",c
+            if (escaped) escaped=0
+            else if (c=="\\") escaped=1
+            else if (c=="\"") in_string=0
+        } else if (c=="\"") { in_string=1; printf "%s",c }
+        else if (c=="{" || c=="[") {
+            close_token=(c=="{" ? "}" : "]")
+            j=next_token(i+1)
+            if (substr(doc,j,1)==close_token) { printf "%s%s",c,close_token; i=j }
+            else {
+                if (depth>=128) bad()
+                stack[++depth]=close_token
+                printf "%s\n",c; indent()
+            }
+        } else if (c=="}" || c=="]") {
+            if (depth<1 || stack[depth]!=c) bad()
+            delete stack[depth--]
+            printf "\n"; indent(); printf "%s",c
+        } else if (c==",") { printf ",\n"; indent() }
+        else if (c==":") printf ": "
+        else if (c !~ /[ \t\r\n]/) printf "%s",c
+    }
+    if (in_string || depth!=0) bad()
+    printf "\n"
+}
+' "$result" > "$work/pretty.json"; then
+        die '无法格式化输出；如需查看原始内容，请加 --raw。'
+    fi
+    result=$work/pretty.json
+fi
+
 printf '注意：输出包含明文凭据，请勿将运行结果提交到 GitHub。\n' >&2
 if [ -n "$output" ]; then
     # POSIX noclobber plus the earlier existence check protects normal files and
@@ -251,5 +301,5 @@ if [ -n "$output" ]; then
     if ! ( set -C; cat "$result" > "$output" ); then die '写入失败；输出路径可能已存在。'; fi
 else
     cat "$result"
-    printf '\n'
+    if [ "$raw" -eq 1 ]; then printf '\n'; fi
 fi
